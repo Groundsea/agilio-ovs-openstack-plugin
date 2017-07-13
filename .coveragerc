@@ -1,0 +1,6 @@
+[run]
+branch = True
+source = networking_netronome.plugins.ml2.drivers.agilio_ovs
+
+[report]
+ignore_errors = True

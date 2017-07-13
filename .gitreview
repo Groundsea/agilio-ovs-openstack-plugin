@@ -1,0 +1,4 @@
+[gerrit]
+host=review.openstack.org
+port=29418
+project=netronome/agilio-ovs-neutron-ml2-plugin.git
