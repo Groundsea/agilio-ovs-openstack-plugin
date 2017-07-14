@@ -112,14 +112,19 @@ def agilio_claim_passthrough(dev, mac_address, pci_slot):
 
 
 @privsep.vif_plug.entrypoint
-def agilio_claim_forwarder(dev, mac_address, pci_slot):
-    _agilio_vf_mgr(['--claim-forwarder', dev, mac_address,
-                   '--pciaddr', pci_slot])
+def agilio_claim_forwarder(dev, mac_address, pci_slot, vhupath=None):
+    cmd = ['--claim-forwarder', dev, mac_address, '--pciaddr', pci_slot]
+    if vhupath:
+        cmd += ['--vhupath', vhupath]
+    _agilio_vf_mgr(cmd)
 
 
 @privsep.vif_plug.entrypoint
-def agilio_release(dev):
-    _agilio_vf_mgr(['--release', dev])
+def agilio_release(pci_slot, vhupath=None):
+    cmd = ['--releasepci', pci_slot]
+    if vhupath:
+        cmd += ['--vhupath', vhupath]
+    _agilio_vf_mgr(cmd)
 
 
 @privsep.vif_plug.entrypoint

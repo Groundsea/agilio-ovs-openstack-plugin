@@ -17,9 +17,15 @@
 #    under the License.
 
 from neutron_lib.api.definitions import portbindings
+from neutron_lib.api.definitions.portbindings import VNIC_TYPE
+from neutron_lib.api.definitions.portbindings import VNIC_VIRTIO_FORWARDER
 
 from neutron.plugins.ml2.drivers.openvswitch.mech_driver \
     import mech_openvswitch
+
+# from oslo_log import log as logging
+
+# LOG = logging.getLogger(__name__)
 
 
 class AgilioOvsMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
@@ -34,8 +40,15 @@ class AgilioOvsMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
         super(AgilioOvsMechanismDriver, self).__init__()
         self.supported_vnic_types += [portbindings.VNIC_DIRECT,
                                       portbindings.VNIC_VIRTIO_FORWARDER]
-        # (jangutter): Something like the following could possibly be used
-        # to allow Nova to set the bridge_name without extending the
-        # the neutron api code:
-        # self.vif_details[portbindings.VHOST_USER_OVS_PLUG] = True
         self.vif_type = 'agilio_ovs'
+
+    def _pre_get_vif_details(self, agent, context):
+        vif_details = super(
+            AgilioOvsMechanismDriver,
+            self)._pre_get_vif_details(agent, context)
+        if context.current[VNIC_TYPE] == VNIC_VIRTIO_FORWARDER:
+            sock_path = self.agent_vhu_sockpath(agent, context.current['id'])
+            vif_details[portbindings.VHOST_USER_SOCKET] = sock_path
+            vif_details[portbindings.VHOST_USER_MODE] = 'client'
+            vif_details[portbindings.VHOST_USER_OVS_PLUG] = True
+        return vif_details
