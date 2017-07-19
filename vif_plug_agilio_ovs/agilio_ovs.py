@@ -29,11 +29,6 @@ from vif_plug_agilio_ovs import agilio_linux_net as linux_net
 from vif_plug_ovs import constants
 from vif_plug_ovs import exception
 from vif_plug_ovs import ovs
-# from vif_plug_ovs.ovs import OvsPlugin
-
-# from vif_plug_ovs import linux_net
-
-# PCIADDR_RE = re.compile("/([^/]+)\.sock$")
 
 
 class AgilioOvsPlugin(ovs.OvsPlugin):
@@ -77,12 +72,12 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
         linux_net.ensure_ovs_bridge(
             vif.network.bridge, constants.OVS_DATAPATH_SYSTEM)
         linux_net.agilio_claim_passthrough(
-            vif.port_profile.vif_name,
+            vif.port_profile.representor_name,
             vif.address,
-            vif.dev_address)
+            vif.port_profile.representor_address)
         linux_net.create_ovs_vif_port(
             vif.network.bridge,
-            vif.port_profile.vif_name,
+            vif.port_profile.representor_name,
             vif.port_profile.interface_id,
             vif.address,
             instance_info.uuid,
@@ -94,13 +89,13 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
         linux_net.ensure_ovs_bridge(vif.network.bridge,
                                     constants.OVS_DATAPATH_SYSTEM)
         linux_net.agilio_claim_forwarder(
-            vif.vif_name,
+            vif.port_profile.representor_name,
             vif.address,
-            vif.port_profile.dev_address,
+            vif.port_profile.representor_address,
             vhupath=vif.path)
         linux_net.create_ovs_vif_port(
             vif.network.bridge,
-            vif.vif_name,
+            vif.port_profile.representor_name,
             vif.port_profile.interface_id,
             vif.address,
             instance_info.uuid,
@@ -123,9 +118,10 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
         # Note: calls agilio_linux_net in stead of linux_net
         linux_net.delete_ovs_vif_port(
             vif.network.bridge,
-            vif.port_profile.vif_name,
+            vif.port_profile.representor_name,
             timeout=self.config.ovs_vsctl_timeout)
-        linux_net.agilio_release(vif.dev_address)
+        linux_net.agilio_release(
+            vif.port_profile.representor_address)
 
     def _unplug_agilio_forwarder(self, vif, instance_info):
         # Note: calls agilio_linux_net in stead of linux_net
@@ -134,7 +130,7 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
             vif.vif_name,
             timeout=self.config.ovs_vsctl_timeout)
         linux_net.agilio_release(
-            vif.port_profile.dev_address,
+            vif.port_profile.representor_address,
             vhupath=vif.path)
 
     def unplug(self, vif, instance_info):
