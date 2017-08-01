@@ -16,16 +16,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron.plugins.ml2.drivers.openvswitch.mech_driver \
+    import mech_openvswitch
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.api.definitions.portbindings import VNIC_TYPE
 from neutron_lib.api.definitions.portbindings import VNIC_VIRTIO_FORWARDER
+from oslo_config import cfg
 
-from neutron.plugins.ml2.drivers.openvswitch.mech_driver \
-    import mech_openvswitch
+from networking_netronome.plugins.ml2.drivers import agilio_ovs_conf
 
-# from oslo_log import log as logging
 
-# LOG = logging.getLogger(__name__)
+CONF = cfg.CONF
+
+agilio_ovs_conf.register_agilio_ovs_opts()
+CONF.import_group('AGILIO_OVS',
+                  'networking_netronome.plugins.ml2.drivers.agilio_ovs_conf')
 
 
 class AgilioOvsMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
@@ -42,6 +47,15 @@ class AgilioOvsMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
                                       portbindings.VNIC_VIRTIO_FORWARDER]
         self.vif_type = 'agilio_ovs'
 
+    def _get_vhost_mode_for_hypervisor(self):
+        # This function returns the vhost mode for the hypervisor.
+        # If virtio-forwarder is set to client, the hypervisor must be
+        # server, and vice versa.
+        if cfg.CONF.AGILIO_OVS.virtio_forwarder_mode == \
+           portbindings.VHOST_USER_MODE_CLIENT:
+            return portbindings.VHOST_USER_MODE_SERVER
+        return portbindings.VHOST_USER_MODE_CLIENT
+
     def _pre_get_vif_details(self, agent, context):
         vif_details = super(
             AgilioOvsMechanismDriver,
@@ -49,6 +63,7 @@ class AgilioOvsMechanismDriver(mech_openvswitch.OpenvswitchMechanismDriver):
         if context.current[VNIC_TYPE] == VNIC_VIRTIO_FORWARDER:
             sock_path = self.agent_vhu_sockpath(agent, context.current['id'])
             vif_details[portbindings.VHOST_USER_SOCKET] = sock_path
-            vif_details[portbindings.VHOST_USER_MODE] = 'client'
+            vif_details[portbindings.VHOST_USER_MODE] = \
+                self._get_vhost_mode_for_hypervisor()
             vif_details[portbindings.VHOST_USER_OVS_PLUG] = True
         return vif_details

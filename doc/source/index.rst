@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 Welcome to agilio-ovs-neutron-ml2-plugin's documentation!
-========================================================
+=========================================================
 
 Contents:
 

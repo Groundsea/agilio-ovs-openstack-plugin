@@ -1,3 +1,4 @@
+# Derived from os-vif/vif_plug_ovs/privsep.py
 #
 # Copyright (c) 2017 Netronome Systems Pty. Ltd.
 # Copyright (C) 2016 Red Hat, Inc

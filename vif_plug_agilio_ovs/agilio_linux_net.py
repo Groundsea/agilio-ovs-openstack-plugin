@@ -18,24 +18,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Implements vlans, bridges using linux utilities."""
-
-import glob
-import os
-import re
-import sys
+"""Linux utilities necessary for Agilio OVS network setup."""
 
 from oslo_concurrency import processutils
 from oslo_log import log as logging
-from oslo_utils import excutils
 
 from vif_plug_agilio_ovs import privsep
-from vif_plug_ovs import constants
 from vif_plug_ovs import exception
 
 LOG = logging.getLogger(__name__)
-
-VIRTFN_RE = re.compile("virtfn(\d+)")
 
 
 def _ovs_vsctl(args, timeout=None):
@@ -68,8 +59,7 @@ def _agilio_vf_mgr(args):
 def _create_ovs_vif_cmd(bridge, dev, iface_id, mac,
                         instance_id, interface_type=None,
                         vhost_server_path=None, virtio_forwarder=None):
-    cmd = ['--', '--if-exists', 'del-port', dev, '--',
-           'add-port', bridge, dev,
+    cmd = ['--', 'add-port', bridge, dev,
            '--', 'set', 'Interface', dev,
            'external-ids:iface-id=%s' % iface_id,
            'external-ids:iface-status=active',
@@ -93,16 +83,11 @@ def _create_ovs_bridge_cmd(bridge, datapath_type):
 def create_ovs_vif_port(bridge, dev, iface_id, mac, instance_id,
                         mtu=None, interface_type=None, timeout=None,
                         vhost_server_path=None, virtio_forwarder=None):
-    _ovs_vsctl(_create_ovs_vif_cmd(bridge, dev, iface_id,
-                                   mac, instance_id, interface_type,
-                                   vhost_server_path, virtio_forwarder),
-               timeout=timeout)
-    _update_device_mtu(dev, mtu, interface_type, timeout=timeout)
-
-
-@privsep.vif_plug.entrypoint
-def update_ovs_vif_port(dev, mtu=None, interface_type=None, timeout=None):
-    _update_device_mtu(dev, mtu, interface_type, timeout=timeout)
+    delete_ovs_vif_port(bridge, dev, timeout=timeout)
+    cmd = _create_ovs_vif_cmd(bridge, dev, iface_id,
+                              mac, instance_id, interface_type,
+                              vhost_server_path, virtio_forwarder)
+    _ovs_vsctl(cmd, timeout=timeout)
 
 
 @privsep.vif_plug.entrypoint
@@ -131,240 +116,8 @@ def agilio_release(pci_slot, vhupath=None):
 def delete_ovs_vif_port(bridge, dev, timeout=None):
     _ovs_vsctl(['--', '--if-exists', 'del-port', bridge, dev],
                timeout=timeout)
-    _delete_net_dev(dev)
-
-
-def device_exists(device):
-    """Check if ethernet device exists."""
-    return os.path.exists('/sys/class/net/%s' % device)
-
-
-def _delete_net_dev(dev):
-    """Delete a network device only if it exists."""
-    if device_exists(dev):
-        try:
-            processutils.execute('ip', 'link', 'delete', dev,
-                                 check_exit_code=[0, 2, 254])
-            LOG.debug("Net device removed: '%s'", dev)
-        except processutils.ProcessExecutionError:
-            with excutils.save_and_reraise_exception():
-                LOG.error("Failed removing net device: '%s'", dev)
-
-
-@privsep.vif_plug.entrypoint
-def create_veth_pair(dev1_name, dev2_name, mtu):
-    """Create veth pair.
-
-    Create a pair of veth devices with the specified names,
-    deleting any previous devices with those names.
-    """
-    for dev in [dev1_name, dev2_name]:
-        _delete_net_dev(dev)
-
-    processutils.execute('ip', 'link', 'add', dev1_name,
-                         'type', 'veth', 'peer', 'name', dev2_name)
-    for dev in [dev1_name, dev2_name]:
-        processutils.execute('ip', 'link', 'set', dev, 'up')
-        processutils.execute('ip', 'link', 'set', dev, 'promisc', 'on')
-        _update_device_mtu(dev, mtu)
-
-
-@privsep.vif_plug.entrypoint
-def update_veth_pair(dev1_name, dev2_name, mtu):
-    """Update a pair of veth devices with new configuration."""
-    for dev in [dev1_name, dev2_name]:
-        _update_device_mtu(dev, mtu)
 
 
 @privsep.vif_plug.entrypoint
 def ensure_ovs_bridge(bridge, datapath_type):
     _ovs_vsctl(_create_ovs_bridge_cmd(bridge, datapath_type))
-
-
-@privsep.vif_plug.entrypoint
-def ensure_bridge(bridge):
-    if not device_exists(bridge):
-        processutils.execute('brctl', 'addbr', bridge)
-        processutils.execute('brctl', 'setfd', bridge, 0)
-        processutils.execute('brctl', 'stp', bridge, 'off')
-        syspath = '/sys/class/net/%s/bridge/multicast_snooping'
-        syspath = syspath % bridge
-        processutils.execute('tee', syspath, process_input='0',
-                             check_exit_code=[0, 1])
-        disv6 = ('/proc/sys/net/ipv6/conf/%s/disable_ipv6' %
-                 bridge)
-        if os.path.exists(disv6):
-            processutils.execute('tee',
-                                 disv6,
-                                 process_input='1',
-                                 check_exit_code=[0, 1])
-    # we bring up the bridge to allow it to switch packets
-    set_interface_state(bridge, 'up')
-
-
-@privsep.vif_plug.entrypoint
-def delete_bridge(bridge, dev):
-    if device_exists(bridge):
-        processutils.execute('brctl', 'delif', bridge, dev)
-        processutils.execute('ip', 'link', 'set', bridge, 'down')
-        processutils.execute('brctl', 'delbr', bridge)
-
-
-@privsep.vif_plug.entrypoint
-def add_bridge_port(bridge, dev):
-    processutils.execute('brctl', 'addif', bridge, dev)
-
-
-def _update_device_mtu(dev, mtu, interface_type=None, timeout=120):
-    if not mtu:
-        return
-    if interface_type not in [
-        constants.OVS_VHOSTUSER_INTERFACE_TYPE,
-        constants.OVS_VHOSTUSER_CLIENT_INTERFACE_TYPE]:
-        if sys.platform != constants.PLATFORM_WIN32:
-            # Hyper-V with OVS does not support external programming of virtual
-            # interface MTUs via netsh or other Windows tools.
-            # When plugging an interface on Windows, we therefore skip
-            # programming the MTU and fallback to DHCP advertisement.
-            _set_device_mtu(dev, mtu)
-    elif _ovs_supports_mtu_requests(timeout=timeout):
-        _set_mtu_request(dev, mtu, timeout=timeout)
-    else:
-        LOG.debug("MTU not set on %(interface_name)s interface "
-                  "of type %(interface_type)s.",
-                  {'interface_name': dev,
-                   'interface_type': interface_type})
-
-
-@privsep.vif_plug.entrypoint
-def _set_device_mtu(dev, mtu):
-    """Set the device MTU."""
-    processutils.execute('ip', 'link', 'set', dev, 'mtu', mtu,
-                         check_exit_code=[0, 2, 3, 254])
-
-
-@privsep.vif_plug.entrypoint
-def set_interface_state(interface_name, port_state):
-    processutils.execute('ip', 'link', 'set', interface_name, port_state,
-                         check_exit_code=[0, 2, 254])
-
-
-@privsep.vif_plug.entrypoint
-def _set_mtu_request(dev, mtu, timeout=None):
-    args = ['--', 'set', 'interface', dev,
-            'mtu_request=%s' % mtu]
-    _ovs_vsctl(args, timeout=timeout)
-
-
-@privsep.vif_plug.entrypoint
-def _ovs_supports_mtu_requests(timeout=None):
-    args = ['--columns=mtu_request', 'list', 'interface']
-    _, error = _ovs_vsctl(args, timeout=timeout)
-    if (error == 'ovs-vsctl: Interface does not contain' +
-                 ' a column whose name matches "mtu_request"'):
-            return False
-    return True
-
-
-def get_representor_port(pf_ifname, vf_num):
-    """Get the representor netdevice which is corresponding to the VF.
-
-    This method gets PF interface name and number of VF. It iterates over all
-    the interfaces under the PF location and looks for interface that has the
-    VF number in the phys_port_name. That interface is the representor for
-    the requested VF.
-    """
-    pf_path = "/sys/class/net/%s" % pf_ifname
-    pf_sw_id_file = os.path.join(pf_path, "phys_switch_id")
-
-    pf_sw_id = None
-    try:
-        with open(pf_sw_id_file, 'r') as fd:
-            pf_sw_id = fd.readline().rstrip()
-    except (OSError, IOError):
-        raise exception.RepresentorNotFound(ifname=pf_ifname, vf_num=vf_num)
-
-    pf_subsystem_file = os.path.join(pf_path, "subsystem")
-    try:
-        devices = os.listdir(pf_subsystem_file)
-    except (OSError, IOError):
-        raise exception.RepresentorNotFound(ifname=pf_ifname, vf_num=vf_num)
-
-    for device in devices:
-        if device == pf_ifname:
-            continue
-
-        device_path = "/sys/class/net/%s" % device
-        device_sw_id_file = os.path.join(device_path, "phys_switch_id")
-        try:
-            with open(device_sw_id_file, 'r') as fd:
-                device_sw_id = fd.readline().rstrip()
-        except (OSError, IOError):
-            continue
-
-        if device_sw_id != pf_sw_id:
-            continue
-        device_port_name_file = (
-            os.path.join(device_path, 'phys_port_name'))
-
-        if not os.path.isfile(device_port_name_file):
-            continue
-
-        try:
-            with open(device_sw_id_file, 'r') as fd:
-                representor_num = fd.readline().rstrip()
-        except (OSError, IOError):
-            continue
-
-        try:
-            if int(representor_num) == int(vf_num):
-                return device
-        except (ValueError):
-            continue
-
-    raise exception.RepresentorNotFound(ifname=pf_ifname, vf_num=vf_num)
-
-
-def _get_sysfs_netdev_path(pci_addr, pf_interface):
-    """Get the sysfs path based on the PCI address of the device.
-
-    Assumes a networking device - will not check for the existence of the path.
-    """
-    if pf_interface:
-        return "/sys/bus/pci/devices/%s/physfn/net" % (pci_addr)
-    return "/sys/bus/pci/devices/%s/net" % (pci_addr)
-
-
-def get_ifname_by_pci_address(pci_addr, pf_interface=False):
-    """Get the interface name based on a VF's pci address
-
-    The returned interface name is either the parent PF or that of the VF
-    itself based on the argument of pf_interface.
-    """
-    dev_path = _get_sysfs_netdev_path(pci_addr, pf_interface)
-    try:
-        dev_info = os.listdir(dev_path)
-        return dev_info.pop()
-    except Exception:
-        raise exception.PciDeviceNotFoundById(id=pci_addr)
-
-
-def get_vf_num_by_pci_address(pci_addr):
-    """Get the VF number based on a VF's pci address
-
-    A VF is associated with an VF number, which ip link command uses to
-    configure it. This number can be obtained from the PCI device filesystem.
-    """
-    virtfns_path = "/sys/bus/pci/devices/%s/physfn/virtfn*" % (pci_addr)
-    vf_num = None
-    try:
-        for vf_path in glob.iglob(virtfns_path):
-            if re.search(pci_addr, os.readlink(vf_path)):
-                t = VIRTFN_RE.search(vf_path)
-                vf_num = t.group(1)
-                break
-    except Exception:
-        pass
-    if vf_num is None:
-        raise exception.PciDeviceNotFoundById(id=pci_addr)
-    return vf_num

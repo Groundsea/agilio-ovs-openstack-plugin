@@ -18,13 +18,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# import re
-# import sys
-
 from os_vif import objects
 from os_vif.objects.vif import VIFPortProfileOVSRepresentor
 
-from vif_plug_agilio_ovs import agilio_linux_net as linux_net
+from vif_plug_agilio_ovs import agilio_linux_net
 
 from vif_plug_ovs import constants
 from vif_plug_ovs import exception
@@ -51,9 +48,8 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
             ])
 
     def _create_vif_port(self, vif, vif_name, instance_info, **kwargs):
-        # Note: calls agilio_linux_net in stead of linux_net
         mtu = self._get_mtu(vif)
-        linux_net.create_ovs_vif_port(
+        agilio_linux_net.create_ovs_vif_port(
             vif.network.bridge,
             vif_name,
             vif.port_profile.interface_id,
@@ -63,19 +59,16 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
             **kwargs)
 
     def _update_vif_port(self, vif, vif_name):
-        # Note: calls agilio_linux_net in stead of linux_net
-        mtu = self._get_mtu(vif)
-        linux_net.update_ovs_vif_port(vif_name, mtu)
+        pass
 
     def _plug_agilio_passthrough(self, vif, instance_info):
-        # Note: calls agilio_linux_net in stead of linux_net
-        linux_net.ensure_ovs_bridge(
+        agilio_linux_net.ensure_ovs_bridge(
             vif.network.bridge, constants.OVS_DATAPATH_SYSTEM)
-        linux_net.agilio_claim_passthrough(
+        agilio_linux_net.agilio_claim_passthrough(
             vif.port_profile.representor_name,
             vif.address,
             vif.port_profile.representor_address)
-        linux_net.create_ovs_vif_port(
+        agilio_linux_net.create_ovs_vif_port(
             vif.network.bridge,
             vif.port_profile.representor_name,
             vif.port_profile.interface_id,
@@ -85,15 +78,14 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
             timeout=self.config.ovs_vsctl_timeout)
 
     def _plug_agilio_forwarder(self, vif, instance_info):
-        # Note: calls agilio_linux_net in stead of linux_net
-        linux_net.ensure_ovs_bridge(vif.network.bridge,
-                                    constants.OVS_DATAPATH_SYSTEM)
-        linux_net.agilio_claim_forwarder(
+        agilio_linux_net.ensure_ovs_bridge(vif.network.bridge,
+                                           constants.OVS_DATAPATH_SYSTEM)
+        agilio_linux_net.agilio_claim_forwarder(
             vif.port_profile.representor_name,
             vif.address,
             vif.port_profile.representor_address,
             vhupath=vif.path)
-        linux_net.create_ovs_vif_port(
+        agilio_linux_net.create_ovs_vif_port(
             vif.network.bridge,
             vif.port_profile.representor_name,
             vif.port_profile.interface_id,
@@ -115,26 +107,23 @@ class AgilioOvsPlugin(ovs.OvsPlugin):
             self._plug_agilio_forwarder(vif, instance_info)
 
     def _unplug_agilio_passthrough(self, vif, instance_info):
-        # Note: calls agilio_linux_net in stead of linux_net
-        linux_net.delete_ovs_vif_port(
+        agilio_linux_net.delete_ovs_vif_port(
             vif.network.bridge,
             vif.port_profile.representor_name,
             timeout=self.config.ovs_vsctl_timeout)
-        linux_net.agilio_release(
+        agilio_linux_net.agilio_release(
             vif.port_profile.representor_address)
 
     def _unplug_agilio_forwarder(self, vif, instance_info):
-        # Note: calls agilio_linux_net in stead of linux_net
-        linux_net.delete_ovs_vif_port(
+        agilio_linux_net.delete_ovs_vif_port(
             vif.network.bridge,
             vif.vif_name,
             timeout=self.config.ovs_vsctl_timeout)
-        linux_net.agilio_release(
+        agilio_linux_net.agilio_release(
             vif.port_profile.representor_address,
             vhupath=vif.path)
 
     def unplug(self, vif, instance_info):
-        # Note: calls agilio_linux_net in stead of linux_net
         if not hasattr(vif, "port_profile"):
             raise exception.MissingPortProfile()
         if not isinstance(vif.port_profile, VIFPortProfileOVSRepresentor):
